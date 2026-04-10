@@ -1,0 +1,11 @@
+apiVersion: v1 #このAPIのバージョンはv1らしいです。
+kind: Pod
+metadata:
+  name: my-nginx-app
+spec:
+  containers:
+  - name: my-nginx-app
+    image: my-nginx-app:latest #loadしたdockerイメージと同一の名称にする必要あり
+    imagePullPolicy: IfNotPresent
+    ports:
+      - containerPort: 80

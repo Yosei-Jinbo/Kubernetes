@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-app
+spec:
+  containers:
+  - name: my-app
+    image: my-app:v1
+    imagePullPolicy: IfNotPresent
+    ports:
+      - containerPort: 8080
