@@ -1,0 +1,23 @@
+kind: Pod
+metadata:
+  name: configmap-volume-demo
+spec:
+  containers:
+  - name: demo
+    image: alpine
+    command: ["sh", "-c", "sleep 3600"]
+    #ここで実際にマウントするファイルを指定する
+    volumeMounts:
+    - name: config
+      mountPath: /config
+      readOnly: true
+  #ConfigMapをvolumeとして参照できるようにする + nameで参照 + itemsでkey-valueのペアを参照できるようにする
+  volumes:
+  - name: config
+    configMap:
+      name: game-demo #ここでConfigMapとしてgame-demoを指定(名前で指定する)
+      items: #取得したい環境変数だけitemで指定する
+      - key: game.properties
+        path: game.properties
+      - key: user-interface.properties
+        path: user-interface.properties

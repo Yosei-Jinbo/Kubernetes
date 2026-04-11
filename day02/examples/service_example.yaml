@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector: #どの Pod をこの Service の配下にするか
+    app.kubernetes.io/name: MyApp
+  ports:
+    - protocol: TCP
+      port: 80 #Service 側で見せるポート
+      targetPort: 9376 #実際に Pod 側へ流すポート

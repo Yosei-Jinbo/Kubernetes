@@ -1,0 +1,5 @@
+#namespaceを定義するyamlファイル
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: day02

@@ -1,0 +1,25 @@
+#Podの設定ファイルにresources項目を入れればいい
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend
+spec:
+  containers:
+    - name: app
+      image: images.my-company.example/app:v4
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "250m" #cpu 0.25コア分
+        limits:
+          memory: "128Mi" #これを超えるとコンテナが強制終了
+          cpu: "500m" #これを超えるとcpu速度が制限
+    - name:
+      image: images.my-company.example/log-aggregator:v6
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "250m"
+        limits:
+          memory: "128Mi"
+          cpu: "500m"

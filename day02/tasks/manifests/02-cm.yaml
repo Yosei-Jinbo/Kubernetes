@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: day02-app-cm
+  namespace: day02
+data:
+  #env注入はkind: こっちでdata:として定義＋Podとしたファイルに直接env: として埋め込む
+  appgreeting: "hello"
+  #volume側は　ここで環境変数を定義 + Podとしたファイルがvolume:でここのnameを参照しながら作る
+  app.conf: |
+    message=hello-from-file

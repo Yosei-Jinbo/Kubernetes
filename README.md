@@ -25,7 +25,9 @@ kind export logs #clusterのログ
 
 - 自作のDockerイメージをkindクラスタ上で動作させるワークフローについて
 ```bash
-docker build -t my-custom-image:unique-tag ./my-image-dir #Dockerイメージの作成
+kind create cluster <--name kind-name> #kindの作成
+
+docker build -t my-custom-image:unique-tag ./my-image-dir #Dockerイメージの作成, my-image-dirはDockerfileのある場所と同じでいいかも
 kind load docker-image my-custom-image:unique-tag #ノードの中にイメージをコピー(イメージをkindに読み込む)
 kubectl apply -f my-custom-image.yaml #読み込まれたイメージからPodを作り、Podとして動かす
 
@@ -65,6 +67,14 @@ kubectl port-forward pod/my-app 8080:8080
 │  └──────────────────────────┘  │
 └─────────────────────────────────┘
 ```
+
+## トラブルシュート
+- 次の順番で見ていくといいらしい
+1. kubectl get pod         → 状態 (Pending / Running / CrashLoopBackOff / Evicted)
+2. kubectl describe pod    → Events とコンテナの Last State (原因の決定打)
+3. kubectl logs <pod>       → アプリ側のエラーメッセージ
+4. kubectl top pod / node  → 実使用量と request/limit の対比
+5. Prometheus など          → 長期トレンド、throttle の有無
 
 ## 高度な設定
 これらはクラスタ作成時に次のようにして設定.yamlファイルを読み込んで特殊な環境にできる

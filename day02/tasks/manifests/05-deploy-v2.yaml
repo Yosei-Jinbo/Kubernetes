@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: day02-app-deployment
+  namespace: day02
+  labels:
+    app: app-deployment #Deployment事態を識別するためのラベル
+spec:
+  replicas: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 2
+  selector:
+    matchLabels:
+      app: day02-app #このDeploymentが見るPod
+  template: #新しく作るPodのひな型
+    metadata:
+      labels:
+        app: day02-app #Podにはるラベル
+    spec:
+      containers:
+      - name: day02-app
+        image: go-image:v1
+        ports:
+        - containerPort: 8090
+        #ここでコンテナに割り当てる最低保証(request)、上限(limit)を設定する
+        resources:
+          requests:
+            cpu: 300m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        #ここでコンテナの生存確認Probeのためのパラメータ設定を実行する
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8090
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        #コンテナの応答確認Probeのためのパラメータ設定
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          failureThreshold: 3
+        #環境変数としてコンテナに注入
+        env:
+        #taskの要件1の環境変数を直接埋め込む
+        - name: APP_VERSION
+          value: "v2"
+        #こっちは02-cm.yamlから持ってくる
+        - name: APP_GREETING
+          valueFrom:
+            configMapKeyRef:
+              name: day02-app-cm
+              key: appgreeting
+        #Volumeをファイルとして読むためにvolumeをマウントする
+        volumeMounts:
+        - name: day02-secret-volume
+          mountPath: /etc/secrets
+          readOnly: true
+        - name: day02-cm-volume
+          mountPath: /etc/app
+          readOnly: true
+      #Pod内にVolumeとして作成し、このVolumeとコンテナを通信させて環境変数として取得させる
+      volumes:
+      - name: day02-secret-volume
+        secret:
+          secretName: day02-app-secret
+          items: #取得したい環境変数のみitemsで指定する
+          - key: api-token
+            path: api-token
+      - name: day02-cm-volume
+        configMap:
+          name: day02-app-cm
+          items:
+          - key: app.conf
+            path: app.conf #volumeMountのmountPath(/etc/app) + ここでのパス(app.conf) => このvolumeのマウント先は/etc/app/app.confとなる

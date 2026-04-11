@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: env-config-all
+spec:
+  containers:
+  - name: app
+    image: busybox:latest
+    command: ["/bin/sh", "-c", "printenv"]
+    #envFromによりConfigMapとして定義したものを取得
+    envFrom:
+    - configMmapRef:
+        name: myconfigmap

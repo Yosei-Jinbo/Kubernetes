@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: security-context-demo
+spec:
+  securityContext:
+    runAsUser: 1000 #コンテナ内のプロセスを UID 1000 のユーザーとして実行する
+    runAsGroup: 3000 #実行プロセスの主グループを GID 3000 にする
+    fsGroup: 2000 #Pod が利用するボリューム上のファイルを、グループID 2000 でもアクセスしやすいようにする設定
+  containers:
+  - name: sec-ctx-demo
+    image: busybox
+    command: ["sh", "-c", "sleep 1h"]
