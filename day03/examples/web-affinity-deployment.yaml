@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-server
+spec:
+  replicas: 3 #Deploymentを3台にする
+  template:
+    metadata:
+      labels:
+        app: web-store #Podのラベル
+    spec:
+      affinity:
+        #web-storeとラベル付けされたPod同士は分散して配置させる
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: #このラベルを持つPodを強制的に別のNodeに配置する
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - web-store
+        podAffinity: #storeとラベル付けされたPodとは同一のNodeに配置する
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+            matchExpressions:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - store
+            topologyKey: "kubernetes.io/hostname" #ホスト名が同一である場所に配置することが必須
+      containers:
+      - name: web-app
+        image: nginx:1.16-alpine

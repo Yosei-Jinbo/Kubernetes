@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exp07-deployment
+spec:
+  #replicas
+  replicas: 3
+  #selector
+  selector:
+    matchLabels:
+      app: gpu
+  #template
+  template:
+    metadata:
+      labels: 
+        app: gpu
+    spec:
+      affinity:
+        #nodeの優先preferred Affinity
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: gpu-type
+                operator: In
+                values:
+                - a100
+        #同じ学習ジョブのPodを異なるzoneに散らす(AntiAffinity)これはPod間のaffinity
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - gpu
+              topologyKey: zone
+      #containers
+      containers:
+      - name: gpu
+        image: nginx:latest

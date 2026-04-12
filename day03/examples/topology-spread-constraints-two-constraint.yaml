@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod
+  labels:
+    foo: bar
+spec:
+  topologySpreadConstraints:
+  # 第1制約: ゾーン間のハード制約
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone #ゾーン(物理的なポイント)
+    whenUnsatisfiable: DoNotSchedule #失敗するならそもそもスケジュールしない
+    labelSelector:
+      matchLabels:
+        app: critical-app
+  # 第2制約: ノード間のソフト制約
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname #ホスト名(software)
+    whenUnsatisfiable: ScheduleAnyway #スケジュールはするが、maxSkewの制約に従うように最全の配置にする
+    labelSelector:
+      matchLabels:
+        app: critical-app
+  containers:
+    - name: pause
+      image: registry.k8s.io/pause:3.1

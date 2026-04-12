@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exp06-deployment
+spec:
+  #replicas
+  replicas: 6
+  #selector
+  selector:
+    matchLabels:
+      app: balanced
+  #template
+  template:
+    metadata:
+      labels:
+        app: balanced
+    spec:
+      containers:
+      - name: balanced
+        image: nginx:latest
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: balanced

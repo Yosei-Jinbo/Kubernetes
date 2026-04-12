@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    env: test
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+    imagePullPolicy: IfNotPresent
+  tolerations:
+  - key: "example-key"
+    operator: "Exists" #keyが存在していればいい
+    effect: "NoSchedule" #新規Podはノードにスケジュールされなくなる(すでに稼働中のPodはそのまま)
+    #ほかのeffectとして(i)PreferNoSchedule(新規Podのスケジュールをなるべく避ける), 
+    #                 (ii)NoExecute(Tolerationなしなら即座にEvict or ありなら永久に残る)
+
+#Node側の設定としては`kubectl taint nodes node1 key1=value1:NoSchedule`によりTaintを設定する

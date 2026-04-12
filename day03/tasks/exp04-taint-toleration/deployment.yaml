@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exp04-deployment
+spec:
+  #replicasの定義
+  replicas: 5
+  #selectorの定義(このDeploymentが面倒を見るPodの選び方 templateで作ったPodのラベルと一致する必要がある)
+  selector:
+    matchLabels:
+      app: nginx
+  #templateによりPodの定義
+  template: #(ここにkind: Podがあると思う)
+    metadata:
+      labels:
+        app: nginx
+    spec: #spec:直下に書き進めていく
+      containers:
+      - name: nginx
+        image: nginx:latest
+        #resourcesによる資源分配 containersの内側にいる必要がある。
+        resources:
+          requests:
+            cpu: "1"
+            memory: "100Mi"
+      #Pod内にtolerationsを入れる(tolerationsはPodに対するもののため)
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: experimental
+        effect: "NoSchedule"

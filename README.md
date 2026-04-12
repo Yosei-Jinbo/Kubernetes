@@ -12,11 +12,11 @@ CoreDNS is running at https://127.0.0.1:33729/api/v1/namespaces/kube-system/serv
 
 To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
 
-kubectl get nodes #クラスタを構成するノードの情報
+kubectl get nodes (--show-labels) #クラスタを構成するノードの情報
 
 kubectl get pods -A -o wide #すべての名前空間のPod一覧
 
-kubectl describe pod -n kube-system <Pod名> #特定のPod内のコンテナ情報
+kubectl describe pod <-n kube-system> <Pod名> #特定のPod内のコンテナ情報, -nはnamespaceを指定するオプションでnamespaceの指定がないならいらない
 
 kind delete cluster #clusterの削除
 
@@ -30,6 +30,8 @@ kind create cluster <--name kind-name> #kindの作成
 docker build -t my-custom-image:unique-tag ./my-image-dir #Dockerイメージの作成, my-image-dirはDockerfileのある場所と同じでいいかも
 kind load docker-image my-custom-image:unique-tag #ノードの中にイメージをコピー(イメージをkindに読み込む)
 kubectl apply -f my-custom-image.yaml #読み込まれたイメージからPodを作り、Podとして動かす
+#※ kubectl apply  -f pod.yaml としてPodの設定ファイルを直接読み込んでもPodとして動かすことが可能
+#※ kubectl delete -f *.yaml  で削除
 
 docker exec -it <node名> crictl images #ノード内のイメージ一覧
 ```

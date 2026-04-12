@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod
+  labels:
+    foo: bar
+spec:
+  topologySpreadConstraints:
+    - maxSkew: 1 #NodeのうちtopologyKeyで指定された領域に配置されているPodのSkew(max - min)が1以内になるように均等に配置
+      topologyKey: zone #zone:<value>ラベルを持つノード間で均等分散
+      whenUnsatisfiable: DoNotSchedule #makSkew制約を満たせなければそもそも配置しない
+      labelSelector: #このラベルを持つPodをカウントする
+        matchLabels:
+          foo: bar
+  containers:
+    - name: pause
+      image: registry.k8s.io/pause:3.1

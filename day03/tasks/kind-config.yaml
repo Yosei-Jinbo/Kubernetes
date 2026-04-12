@@ -1,0 +1,24 @@
+#kind-config.yamlを継承してクラスタを作成するときはkind create cluster --config kind-config.yaml
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+nodes: #ノードをそれぞれ5つ定義する
+  - role: control-plane
+  - role: worker
+    labels:
+      zone: a
+      gpu-type: a100
+      tier: high-perf
+  - role: worker
+    labels:
+      zone: a
+      gpu-type: v100
+      tier: standard
+  - role: worker
+    labels:
+      zone: b
+      gpu-type: v100
+      tier: standard
+  - role: worker
+    labels:
+      zone: b
+      tier: low-perf

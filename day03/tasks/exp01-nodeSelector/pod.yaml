@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: exp01-pod
+spec:
+  nodeSelector:
+    gpu-type: a100
+  containers:
+  - name: exp01-containers
+    image: nginx

@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exp01-deployment
+  labels:
+    app: deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+
+  template: #Podの理想の状態を宣言
+    metadata:
+      labels: #metadataとして(通常のPodはname:だが)labels:により管理
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        resources: #リソースはコンテナにつける設定なのでcontainers:直下に置く
+          requests:
+            cpu: "1"
+            memory: "100Mi"
+      nodeSelector: #nodeSelector:直下にはkey: valueをそのままくっつける
+        gpu-type: a100
+      tolerations:
+      - key: dedicated
+        operator: "Equal"
+        effect: "NoSchedule"

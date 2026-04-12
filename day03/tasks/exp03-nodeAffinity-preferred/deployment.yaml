@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exp03-deployment
+spec:
+  #replicasの定義
+  replicas: 5
+  #selectorの定義(このDeploymentが面倒を見るPodの選び方 templateで作ったPodのラベルと一致する必要がある)
+  selector:
+    matchLabels:
+      app: nginx
+  #templateによりPodの定義
+  template: #(ここにkind: Podがあると思う)
+    metadata:
+      labels:
+        app: nginx
+    spec: #spec:直下に書き進めていく
+      containers:
+      - name: nginx
+        image: nginx:latest
+        #resourcesによる資源分配 resourcesはコンテナに配分される資源であるため
+        resources:
+          requests:
+            cpu: "1"
+            memory: "100Mi"
+      #優先制御(優先制御もPod自身が持っているもののはず) preferred***により重みをつけて制御
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          #スケジューラはノードごとにマッチしたpreferredのweightを合計して、
+          #その合計が最も高いノードに対してPodを割り当てる
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: tier
+                operator: In
+                values:
+                - high-perf
+          - weight: 10
+            preference:
+              matchExpressions:
+              - key: tier
+                operator: In
+                values:
+                - standard
+      #Pod内にtolerationsを入れる(tolerationsはPodに対するもののため)
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        effect: "NoSchedule"
+
+
+#これを実行した結果について、
+#┌──────────────┬───────────┬───────┐                                                                                                                                                                                                               
+#│    ノード    │   tier    │ Pod数 │                                                                                                                                                                                                               
+#├──────────────┼───────────┼───────┤                                                                                                                                                                                                               
+#│ kind-worker  │ high-perf │ 3個   │                                                                                                                                                                                                               
+#├──────────────┼───────────┼───────┤                                                                                                                                                                                                               
+#│ kind-worker2 │ standard  │ 1個   │                                                                                                                                                                                                               
+#├──────────────┼───────────┼───────┤
+#│ kind-worker3 │ standard  │ 1個   │                                                                                                                                                                                                               
+#└──────────────┴───────────┴───────┘
+
+#high-perfのworkerが「埋まった」わけではありません。 resources がcontainersの外にあるので実際にはリソース制約が効いておらず、workerにまだ余裕があります。                                                                                           
+
+#起きていることは:                                                                                                                                                                                                                                  
+#1. スケジューラはweight 100のhigh-perfノードを最も優先する
+#2. しかし5個全部をhigh-perfに置くとノード間のバランスが悪くなる                                                                                                                                                                                    
+#3. スケジューラはweightだけでなくノード間の負荷分散も考慮するので、一部をstandard（weight 10）のノードに分散させた
+                                                                                                                                                                                                                                                    
+#これがまさに preferred（ソフト制約） の特徴です。「できるだけhigh-perfに寄せるが、他の要素も考慮して最終判断する」という挙動です。

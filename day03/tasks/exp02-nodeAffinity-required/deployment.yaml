@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exp02-deployment
+  labels: #ただのkey-value
+    app: deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  #実際のPodの状態を定義する部分(実際にkind:Podと宣言するみたいに書く)
+  template:
+    metadata:
+      labels:
+        app: nginx #Podにつくラベル
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+      resources:
+        requests:
+          cpu: "1"
+          memory: "100Mi"
+      #nodeAffinityにより優先度・強制制御を行う部分(affinityはPodの直下に飲みかける, Deploymentの直下には書けない)
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: gpu-type
+                operator: In
+                values:
+                - a100
+      tolerations:
+      - key: dedicated
+        operator: "Equal"
+        effect: "NoSchedule"
