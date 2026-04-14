@@ -1,0 +1,18 @@
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+#kube-schedulerがレプリカでスケジューリングすると競合してしまう。
+#そのため、leaderを選んでそいつがスケジューリングを実行(ほかのレプリカはスタンバイとして待機)
+leaderElection:
+  leaderElect: true
+#scheduler が kube-apiserver に接続するための kubeconfig ファイルのパス
+clientConnection: 
+  kubeconfig: /etc/kubernetes/scheduler.conf
+profiles:
+- schedulerName: default-scheduler #このプロファイルを標準スケジューラとしてふるまうようにする(単一スケジューラ方式)
+  #そのプラグインが実装しているすべての拡張ポイントに一括で登録する
+  plugins:
+    multiPoint:
+      enabled:
+      - name: Coscheduling #ギャングスケジューリングの実装
+      disabled:
+      - name: PrioritySort
