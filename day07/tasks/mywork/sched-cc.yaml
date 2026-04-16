@@ -1,0 +1,17 @@
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+#kube-schedulerがレプリカでスケジューリングすると競合してしまう。
+#そのため、leaderを選んでそいつがスケジューリングを実行(ほかのレプリカはスタンバイとして待機)
+leaderElection:
+  leaderElect: true
+#scheduler が kube-apiserver に接続するための kubeconfig ファイルのパス
+clientConnection:
+  kubeconfig: /etc/kubernetes/scheduler.conf
+profiles:
+- schedulerName: default-scheduler #標準スケジューラ代わりにする(単一スケジューラ方式)
+  #そのプラグインが実装している拡張点Filterに実装する
+  plugins:
+    #filterのみ(複数拡張点があるならmultiPoint:とする)
+    filter:
+      enabled:
+      - name: my-scheduler #Filterは追加するだけ(ほかの何かをdisabledにする必要はない)
