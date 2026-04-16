@@ -1,0 +1,89 @@
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+leaderElection:
+  leaderElect: false
+#スケジューラが kube-apiserver に接続するための kubeconfig のパス
+clientConnection:
+  kubeconfig: "/etc/kubernetes/scheduler.conf"
+profiles:
+  - schedulerName: network-aware-scheduler
+    plugins:
+      #プラグインが実装している全拡張ポイントに一括で登録
+      multiPoint:
+        enabled:
+          - name: NetworkOverhead
+            weight: 5 # A higher weight is given to NetworkOverhead to favor allocation schemes with lower latency.
+          - name: BalancedAllocation
+            weight: 1
+        disabled:
+          - name: NodeResourcesFit # Preferably avoid the combination of NodeResourcesFit with NetworkOverhead
+      #queueSortの部分だけ置き換えるよ(queueSortはひとつしか存在できないのでこのタイミングでTopologicalSort以外を無効化する)
+      queueSort:
+        enabled:
+          - name: TopologicalSort
+        disabled:
+          - name: "*"
+    #各プラグインへの個別引数。
+    pluginConfig:
+      #TopologicalSort は default namespace の AppGroup だけを監視
+      - name: TopologicalSort
+        args:
+          namespaces:
+            - "default"
+      #CR = Custom Resource、つまり「Kubernetes に後から追加された、ユーザー定義のリソース型」
+      #Kubernetes には元々 Pod, Service, Deployment, Node といったビルトインのリソース型がありますよね。
+      #これらは kubectl get pods のように扱えます。CR はこれと同じ仕組みを自分で拡張して作れる機能で、例えば kubectl get networktopologies のように、新しい種類のリソースを Kubernetes に認識させられます。
+
+      #CRD (Custom Resource Definition): 「こういう型のリソースを追加するよ」というスキーマ定義。クラスに相当。
+      #CR (Custom Resource): その型に従って作られた実体。インスタンスに相当。
+      #つまり、誰かがまず NetworkTopology という CRD をクラスタにインストールしておき(kubectl apply -f networktopology-crd.yaml)、
+      #  その後にユーザーが具体的な NetworkTopology オブジェクト(= CR)を作る、という 2 段階です。
+
+      #NetworkOverhead プラグインが「スコア計算のとき、net-topology-test という名前の NetworkTopology CR を読みに行って、その中の UserDefined という重みセットを使」
+      - name: NetworkOverhead
+        args:
+          namespaces:
+            - "default"
+          weightsName: "UserDefined" # The respective weights to consider in the plugins
+          networkTopologyName: "net-topology-test" # networkTopology CR to be used by the plugins
+
+
+
+-----------------------------------------------------------------------------------------------
+#[あなた]                           [kube-apiserver]                [スケジューラ]
+#   |                                     |                              |
+#   |-- kubectl apply -f net-topo.yaml -->|                              |
+#   |                                     | (etcd に保存)                |
+#   |                                     |                              |
+#   |                                     |<-- GET networktopologies ----|
+#   |                                     |--- CR の中身を返す --------->|
+#   |                                     |                      (スコア計算に使用)
+
+#実際には次のようにNetworkTopology CR(Custom Resource)は次のようになる? 
+#例: net-topo.yaml
+#このNetworkTopologyはnamespace単位で管理される。Pod や ConfigMap が namespace に属するのと同じ感覚でこのNetworkTopologyというリソースがdefault namespaceに属している。
+apiVersion: networktopology.diktyo.x-k8s.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: net-topology-test      # ← ここが networkTopologyName で参照される
+  namespace: default
+spec:
+  weights:
+    - name: UserDefined        # ← ここが weightsName で参照される
+      topologyList:
+        - topologyKey: topology.kubernetes.io/zone
+          originList:
+            - origin: zone-a
+              costList:
+                - destination: zone-b
+                  networkCost: 20
+                - destination: zone-c
+                  networkCost: 40
+            - origin: zone-b
+              costList:
+                - destination: zone-c
+                  networkCost: 30
+    - name: MeasuredLatency    # 別の重みセットも持てる
+      topologyList:
+        ...
+  configmapName: "netperfmetrics"

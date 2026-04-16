@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-annotation-nginx
+  annotations:
+    my-scheduler/require-label: "env=hogehoge"
+spec:
+  containers:
+  - name: nginx-annotation-ng
+    image: nginx:latest
