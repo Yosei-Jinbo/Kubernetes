@@ -1,0 +1,20 @@
+# day08/tasks/manifests/test-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-my-scheduler
+  namespace: default
+  labels:
+    app: scheduler-test
+spec:
+  schedulerName: my-scheduler          # ここで自作スケジューラのほうを呼び出す。
+  containers:
+  - name: pause
+    image: registry.k8s.io/pause:3.10
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 32Mi

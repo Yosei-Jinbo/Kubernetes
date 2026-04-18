@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment #自作SchedulerをDeploymentとして起動する
+metadata:
+  name: my-scheduler
+  namespace: kube-system
+  labels:
+    component: my-scheduler
+spec:
+  replicas: 1                  # 開発中は1、本番はleaderElectで複数可
+  selector:
+    matchLabels:
+      component: my-scheduler
+  template:
+    metadata:
+      labels:
+        component: my-scheduler
+    spec:
+      serviceAccountName: my-scheduler
+      containers:
+      - name: my-scheduler
+        # ↓ 自作プラグインを組み込んでビルドしたイメージ
+        image: ghcr.io/y-jinbo/my-scheduler:dev
+        command:
+        - /my-scheduler
+        - --config=/etc/kubernetes/my-scheduler-config.yaml
+        - --v=4
+        volumeMounts:
+        - name: config
+          mountPath: /etc/kubernetes
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 10259
+            scheme: HTTPS
+          initialDelaySeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 10259
+            scheme: HTTPS
+      volumes:
+      - name: config
+        configMap:
+          name: my-scheduler-config

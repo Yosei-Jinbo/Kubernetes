@@ -1,0 +1,20 @@
+# my-scheduler-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-scheduler-config
+  namespace: kube-system
+data:
+  my-scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: true
+      resourceName: my-scheduler          # ← デフォルトとLease名を分ける(重要)
+      resourceNamespace: kube-system
+    profiles:
+    - schedulerName: my-scheduler         # ← 独自の名前
+      plugins:
+        score:
+          enabled:
+          - name: GPUGenerationScore
