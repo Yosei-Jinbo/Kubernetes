@@ -1,0 +1,19 @@
+apiVersion: kueue.k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: "cluster-queue"
+spec:
+  namespaceSlector: {} #すべてにマッチするようにする(クラスタ単位でのキューイング)
+  resourceGroups:
+  - coverdResources: ["cpu", "memory", "pods"]
+    flavors:
+    #nominalQuota: そのClusterQueueに割り当てられたリソースの量、admit済みのWorkloadのrequests挿話がこの値を超えないようにKueueが入り口で絞る
+    #Jobキューのadmission判断に利用される(Job単位での資源間にに利用される)
+    - name: "default-flavor"
+      resources:
+      - name: "cpu"
+        nominalQuota: 9
+      - name: "memory"
+        nominalQuota: 36Gi
+      - name: "pods"
+        nominalQuota: 5

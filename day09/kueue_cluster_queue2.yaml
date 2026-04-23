@@ -1,0 +1,460 @@
+# =============================================================================
+# Kueue ClusterQueue ハンズオン (v1beta2)
+# -----------------------------------------------------------------------------
+# このマニフェスト 1 本で、ClusterQueue の以下の主要機能を一通り触れます:
+#   - ResourceFlavor (on-demand/spot, A100/H100 の計4種)
+#   - resourceGroups (CPU/memory/pods と GPU の 2 グループ)
+#   - nominalQuota / borrowingLimit / lendingLimit
+#   - namespaceSelector (matchLabels)
+#   - queueingStrategy (BestEffortFIFO / StrictFIFO を両 CQ で)
+#   - cohort (2 つの ClusterQueue を "research" Cohort に所属)
+#   - flavorFungibility (whenCanBorrow / whenCanPreempt / preference)
+#   - preemption (reclaimWithinCohort / borrowWithinCohort / withinClusterQueue)
+#   - stopPolicy (通常は None。メンテナンス時の使い方はコメント参照)
+#   - LocalQueue と Job への queue-name ラベル付け
+#
+# 前提:
+#   - Kueue >= v0.17 インストール済み (LendingLimit が stable)
+#     https://kueue.sigs.k8s.io/docs/installation/
+#   - kubectl apply -f kueue-clusterqueue-handson.yaml
+#
+# 補足:
+#   ResourceFlavor の nodeLabels はノード側にも対応ラベルが必要です。
+#   kind / minikube 等のローカル環境で admission 挙動だけ見たい場合は、
+#   Pod が実際に schedule できなくても Kueue の admission 判定は動きます。
+#   実ノードに schedule させたい場合は、例えば:
+#     kubectl label node <node> instance-type=on-demand
+#   のように先にノードへラベルを付けてください。
+# =============================================================================
+
+
+
+# -----------------------------------------------------------------------------
+# 1. Namespaces
+#    namespaceSelector が matchLabels で絞り込めることを確認するため、
+#    両チームの Namespace に同じラベル research-cohort=team-ab を付けています。
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-a
+  labels:
+    research-cohort: team-ab
+---
+apiVersion: v1
+kind: Namespace
+medata:
+  name: team-b
+  labels:
+    research-cohort: team-ab
+---
+
+
+# -----------------------------------------------------------------------------
+# 2. PriorityClass (Preemption のテスト用)
+#    Workload の priority は、Pod テンプレートの priorityClassName から
+#    Kueue が自動で引き継ぎます (WorkloadPriorityClass で上書きも可能)。
+# -----------------------------------------------------------------------------
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 1000
+globalDefault: false
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClasss
+metadata:
+  name: low-priority
+value: 100 #valueが小さいので低優先度
+globalDefault: false
+---
+ 
+ 
+# -----------------------------------------------------------------------------
+# 3. ResourceFlavor
+#    3-1. CPU/memory 側: on-demand / spot
+# -----------------------------------------------------------------------------
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: on-demand
+spec:
+  nodeLabels:
+    instance-type: on-demand
+---
+apiVersion: kueue,x-xk8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: spot
+spec:
+  nodeLabels:
+    instance-type: spot
+  #Spotノードにtaintをつけて保護しsている想定
+  #Workload側ではKueueが自動でtolerationを注入
+  tolerations:
+  - key: "cloud.google.com/gke-spot"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  nanme: nvidia-A100
+spec:
+  nodeLabels:
+    accelerator: nvidia-A100
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: nvidia-H100
+spec:
+  nodeLabels:
+    accelerator: nvidia-H100
+---
+ 
+ 
+# =============================================================================
+# 4. ClusterQueue: team-a-cq
+#    - Cohort "research" のメンバー (team-b-cq と quota を貸し借り可)
+#    - queueingStrategy: BestEffortFIFO (先頭ブロック回避)
+#    - flavorFungibility: 両方 TryNextFlavor + BorrowingOverPreemption
+#    - preemption: 保守的に LowerPriority のみ
+# =============================================================================
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: team-a-cq
+spec:
+  cohortName: research #どのCohort(Quotaを貸し借りできるグループ)に所属しているか
+  #どのnamespace内でこの設定を有効化するか?
+  namespaceSelector:
+    matchLabels:
+      research-cohort: team-ab
+  #ClusterQueueでキュー内の Workload の順序付け方を決定
+  queueingStrategy: BestEffortFIFO #BestEffortFIFO: 先頭のWorkloaadがadmitできないと後続もブロック、BestEffortFIFO(default): 先頭がwaitしていても後続がadmitできるならそれをadmit
+  #同じノード群に紐づくリソースは同じ flavor で割り当てるべき、という制約条件
+  #同一ノード上に共存するCPU・memory・GPUなどはひとつのresourceGroupにまとめる
+  resourceGroups:
+  #Group1: ノード属性に紐づく CPU/memory/pods
+  - coverdResources: ["cpu", "memory", "pods"]
+    flavors:
+    # on-demand を先に評価 (優先)
+    - name: on-demand
+      resources:
+      - name: cpu
+        nominalQuota: 9            # 公称の自分の取り分
+        borrowingLimit: 6          # Cohort からさらに +6 まで借りられる (実効上限 15)
+        lendingLimit: 3            # 他 CQ へは最大 3 までしか貸さない (自分用に最低 6 確保)
+      - name: memory
+        nominalQuota: 36Gi
+        borrowingLimit: 24Gi
+        lendingLimit: 12Gi
+      - name: pods
+        nominalQuota: 20           # admit できる Pod 総数の上限
+        # pods の borrowing/lending 未指定: Cohort 全量まで貸借可
+ 
+    # on-demand で入らない場合の代替
+    - name: spot
+      resources:
+      - name: cpu
+        nominalQuota: 18
+        borrowingLimit: 12
+      - name: memory
+        nominalQuota: 72Gi
+        borrowingLimit: 48Gi
+      - name: pods
+        nominalQuota: 40
+
+  #Group2: GPU
+  #ノード種別と強くむずびつくので CPU / memoryと別グループにしている?
+  - coverdResources: ["nvidia.com/gpu"]
+    flavors:
+    - name: nvidia-A100
+      resources:
+      - name: nvidia.com/gpu
+        nominalQuota: 4
+        borrowingLimit: 2 #ここまでしか借りれない
+        lendingLimit: 1 #ここまでしか貸し出せない
+    - name: nvidia-h100
+      resources:
+      - name: nvidia.com/gpu
+        nominalQuota: 2
+        borrowingLimit: 1
+
+  # ---- flavorFungibility ---------------------------------------------------
+  # 「借用/退避が必要なら次の flavor も比較する」ポリシー。
+  # preference で、最終タイブレークを制御。
+  #   BorrowingOverPreemption (default): 借用 > 退避
+  #   PreemptionOverBorrowing          : 退避 > 借用 (自テナント quota 回復重視)
+  #「resourceGroup.flavors[] のリストを上から評価していくとき、どこで打ち切るか」
+  flavorFungibility:
+    whenCanBorrow: TryNextFlavor #そのworkloadがBorrowありで割り当て可能ならそれを保存し、よりよいものの探索のために打ち切らずに続ける
+    whenCanPreempt: TryNextFlavor #
+    preference: BorrowingOverPreemption #複数のワークロードの割り当て方があればBorrow 系の候補を優先
+
+  #preemption(誰(Workload)をどこ(ClusterQueue)から退避するか?)
+  preemption:
+    #Cohort側でnominalQuotaを超過使用しているほかのClusterQueueジョブを退避
+    #貸したnominalを他CQに貸しているQuotaから回収する
+    reclaimWithCohort: :LowerPriority
+    #自分のClusterQueue内でのジョブ退避ポリシー、低優先度のworkloadを退避
+    withinClusterQueue: LowerPriority
+    #借用が必要な場面でのCohort内退避 Fair Sharingとは併用不可? 自分のnominalを超過して、Cohort内の他のCQからクオータを回収する
+    borrowWithinCohort:
+      policy: LowerPriority
+      maxPriorityThreshold: 500 #他のCQ内のworkloadのうち priority 500 以下しか退避できないキャップ
+
+  # ---- stopPolicy ----------------------------------------------------------
+  # None (既定): 通常運用
+  # Hold       : 新規 admit 停止、既存はそのまま
+  # HoldAndDrain: 新規 admit 停止 + 既存も退避
+  stopPolicy: None
+ 
+  # ---- admissionChecks -----------------------------------------------------
+  # ProvisioningRequest / MultiKueue などを挟みたい場合に参照。
+  # 今回は空 (デフォルト) のまま。
+  # admissionChecks:
+  # - provisioning-check
+---
+
+
+# =============================================================================
+# 5. ClusterQueue: team-b-cq
+#    team-a-cq とはわざと異なる設定にして、同じ Cohort 内で挙動差が出るように。
+#    - queueingStrategy: StrictFIFO
+#    - flavorFungibility: whenCanBorrow=MayStopSearch (借りれれば即採用)
+#    - preemption: reclaimWithinCohort=Any (priority 無視して奪還)
+# =============================================================================
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: team-b-cq
+spec:
+  cohortName: research
+ 
+  namespaceSelector:
+    matchLabels:
+      research-cohort: team-ab
+ 
+  queueingStrategy: StrictFIFO
+ 
+  resourceGroups:
+  - coveredResources: ["cpu", "memory", "pods"]
+    flavors:
+    - name: on-demand
+      resources:
+      - name: cpu
+        nominalQuota: 12
+        lendingLimit: 4            # 自分用に最低 8 を確保
+      - name: memory
+        nominalQuota: 48Gi
+        lendingLimit: 16Gi
+      - name: pods
+        nominalQuota: 30
+    - name: spot
+      resources:
+      - name: cpu
+        nominalQuota: 24
+      - name: memory
+        nominalQuota: 96Gi
+      - name: pods
+        nominalQuota: 60
+ 
+  - coveredResources: ["nvidia.com/gpu"]
+    flavors:
+    - name: nvidia-a100
+      resources:
+      - name: nvidia.com/gpu
+        nominalQuota: 2
+    - name: nvidia-h100
+      resources:
+      - name: nvidia.com/gpu
+        nominalQuota: 4
+        lendingLimit: 1
+ 
+  flavorFungibility:
+    whenCanBorrow: MayStopSearch     # 借りれればそれ以上探さない
+    whenCanPreempt: TryNextFlavor
+ 
+  preemption:
+    reclaimWithinCohort: Any          # priority 無視で奪還
+    withinClusterQueue: LowerOrNewerEqualPriority
+    borrowWithinCohort:
+      policy: Never                   # 借用時は他チームを退避しない
+---
+
+
+# -----------------------------------------------------------------------------
+# 6. LocalQueue: 各 Namespace から ClusterQueue を参照する窓口
+# -----------------------------------------------------------------------------
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata::
+  namespace: team-a
+  name: lq-team-a
+spec:
+  clusterQueue: team-a-cq #team-a-cqにバインドする
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  namespace: team-b
+  name: lq-team-b
+spec:
+  clusterQueue: team-b-cq
+---
+
+
+# =============================================================================
+# 7. Sample Jobs (Workload)
+#    Kueue 管理下にするには、Job の metadata.labels に
+#       kueue.x-k8s.io/queue-name: <LocalQueue 名>
+#    を付けるだけ。suspend: true は Kueue の webhook が自動で付けてくれるが、
+#    明示しておくと admit 前の状態が分かりやすい。
+# =============================================================================
+
+# 7-1. Basic: nominalQuota 内で確実に admit されるはずの Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: basic-fit
+  namespace: team-a
+  labels:
+    kueue.x-k8s.io/queue-name: lq-team-a
+spec:
+  parallelism: 2
+  completions: 2
+  suspend: true
+  template:
+    spec:
+      priorityClassName: low-priority
+      restartPolicy: Never
+      containers:
+      - name: woker
+        image: busybox:1.36
+        command: ["sh", "-c", "echo running; sleep 60; echo done"]
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+---
+ 
+# 7-2. Borrowing: team-a の nominalQuota(cpu=9) を超えるが
+#      Cohort 経由で借用できれば admit されるケース。
+#      (team-b が空なら borrowingLimit=6 と合わせて cpu=15 まで使える)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: borrowing
+  namespace: team-a
+  labels:
+    kueue.x-k8s.io/queue-name: lq-team-a
+spec:
+  parallelism: 3
+  completions: 3
+  suspend: true
+  template:
+    spec:
+      priorityClassName: low-priority
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: ["sh", "-c", "echo running; sleep 120; echo done"]
+        resources:
+          requests:
+            cpu: "4"       # 3 並列 × 4 = 12 CPU (自 CQ の 9 を超え、借用発生)
+            memory: 12Gi
+---
+ 
+# 7-3. GPU Job: A100 を要求。flavorFungibility により
+#      まず nvidia-a100 flavor で評価される。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-a100-job
+  namespace: team-b
+  labels:
+    kueue.x-k8s.io/queue-name: lq-team-b
+spec:
+  parallelism: 1
+  completions: 1
+  suspend: true
+  template:
+    spec:
+      priorityClassName: high-priority
+      restartPolicy: Never
+      containers:
+      - name: training
+        image: busybox:1.36
+        command: ["sh", "-c", "echo gpu-train; sleep 180; echo done"]
+        resources:
+          requests:
+            cpu: "4"
+            memory: 16Gi
+            nvidia.com/gpu: "2"
+---
+ 
+# 7-4. Preemption trigger:
+#      low-priority のジョブが先に走って quota を食っている状態で
+#      この high-priority ジョブを投げると、
+#      withinClusterQueue: LowerPriority により退避が発生するはず。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preempt-trigger
+  namespace: team-a
+  labels:
+    kueue.x-k8s.io/queue-name: lq-team-a
+spec:
+  parallelism: 1
+  completions: 1
+  suspend: true
+  template:
+    spec:
+      priorityClassName: high-priority
+      restartPolicy: Never
+      containers:
+      - name: critical
+        image: busybox:1.36
+        command: ["sh", "-c", "echo critical; sleep 60; echo done"]
+        resources:
+          requests:
+            cpu: "8"
+            memory: 32Gi
+---
+ 
+ 
+# =============================================================================
+# 検証用 kubectl コマンド (参考)
+# -----------------------------------------------------------------------------
+#   # ResourceFlavor / ClusterQueue / LocalQueue の一覧
+#   kubectl get resourceflavor
+#   kubectl get clusterqueue
+#   kubectl get localqueue -A
+#
+#   # kueuectl (Kueue 公式 CLI) が入っていれば:
+#   kueuectl list clusterqueue
+#   kueuectl describe clusterqueue team-a-cq
+#
+#   # ClusterQueue の現在の使用量 (.status.flavorsUsage) を確認:
+#   kubectl get clusterqueue team-a-cq -o yaml | less
+#
+#   # Workload (Kueue 内部オブジェクト) の admit 状況:
+#   kubectl get workloads -A
+#   kubectl describe workload -n team-a <workload-name>
+#
+#   # Job の状態 (suspend / running / completed):
+#   kubectl get jobs -A
+#
+#   # 一時停止を試す:
+#   kubectl patch clusterqueue team-a-cq --type=merge \
+#     -p '{"spec":{"stopPolicy":"Hold"}}'
+#   # 解除:
+#   kubectl patch clusterqueue team-a-cq --type=merge \
+#     -p '{"spec":{"stopPolicy":"None"}}'
+# =============================================================================
+ 
