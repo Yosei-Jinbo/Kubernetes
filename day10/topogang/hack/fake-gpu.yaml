@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Node
+metadata:
+  name: topogang-cluster-worker          # rack=A
+status:
+  capacity:
+    nvidia.com/gpu: "4"
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: topogang-cluster-worker2         # rack=A  ← rack A 合計を 6 GPU に絞るために 2 にする
+status:
+  capacity:
+    nvidia.com/gpu: "2"
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: topogang-cluster-worker3         # rack=B (今回の Job では nodeAffinity で除外される)
+status:
+  capacity:
+    nvidia.com/gpu: "4"
+
+# rack A 合計 = 4 + 2 = 6 GPU。
+# Job は 4 Pod × 2 GPU = 8 GPU 要求するので、3 Pod だけ Running、1 Pod は Pending のまま残る。
+#
+#この変更を取り消すときは
+# capacity: {} として空集合を宣言すればいい
