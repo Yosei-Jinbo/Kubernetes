@@ -1,0 +1,132 @@
+#ServiceAccount
+#PodがKubernetes API serverに対して名乗るためのID
+#  ┌─ Deployment: topogang-scheduler ─────────────┐
+#  │  spec.template.spec.serviceAccountName:      │                                                                                        
+#  │    topogang-scheduler   ◄── ここで指定      │
+#  │  containers:                                  │                                                                                       
+#  │  - kube-scheduler binary                     │
+#  │    └─ 起動すると Pod 監視/Node bind の API   │                                                                                        
+#  │       を叩く必要がある                        │                                                                                       
+#  └──────────────────────────────────────────────┘                                                                                        
+#                      ↓ token を提示                                                                                                      
+#         API server が「あ、topogang-scheduler 君ね」と認識                                                                               
+#                      ↓                                                                                                                   
+#         ClusterRoleBinding を見て「pods/binding できる権限あるな」                                                                       
+#                      ↓                                                                                                                   
+#         許可                                                                                                                             
+#                                                                                                                                          
+#  ServiceAccount を割り当てないと、Pod は system:serviceaccount:<namespace>:default という権限ほぼゼロの SA で動き、scheduler が          
+#  pods/binding を作ろうとした瞬間に 403 Forbidden で止まります。
+apiVersion: v1
+kind: ServiceAccount #PodがKubernetes APIをたたくための「アカウント」(Podが認証を受けるためのもの)
+metadata:
+  name: topogang-scheduler
+  namespace: kube-system
+---
+#ClusterRole, ClusterRoleBinding
+#RBAC: Role-Based Access Control(役割ベースのアクセス制御)。「誰が・何に・何をしてよいか」を定義する仕組み
+#┌──────────────────────────────────┬──────────────────────────────────────────────────────────┐
+#│             リソース             │                           役割                           │
+#├──────────────────────────────────┼──────────────────────────────────────────────────────────┤
+#│ Role / ClusterRole               │ 「何にどんな操作ができるか」のルール定義（権限のセット） │
+#├──────────────────────────────────┼──────────────────────────────────────────────────────────┤
+#│ RoleBinding / ClusterRoleBinding │ Role を ServiceAccount(やユーザー)に付与する             │
+#└──────────────────────────────────┴──────────────────────────────────────────────────────────┘
+#Kubernetes に最初から組み込まれている system:kube-scheduler という ClusterRole を、my-scheduler SA に丸ごと付与する。
+#Kubernetes は system: プレフィックスで始まる ClusterRole を デフォルトで作っており、そこに「default schedulerが必要とする権限の標準セット」がまとまっています。
+#自作 scheduler も同じ scheduler binary を起動して同じ APIを叩くので、そのまま使い回せるわけです。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: topogang-scheduler-as-kube-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kube-scheduler #既存のClusterRoleをそのまま使用
+subjects:
+- kind: ServiceAccount
+  name: topogang-scheduler
+  namespace: kube-system
+---
+#system:volume-scheduler という別の組み込み ClusterRole を、同じ SA に追加で付与。
+#historical reason ですが、Kubernetes は権限を 責務単位で細かく ClusterRole 化しています。
+#system:kube-scheduler は「Pod scheduling本体」、system:volume-scheduler は「PV/PVC binding 周り」という分け方。
+#1つの SA に複数の ClusterRoleBinding を貼ることで、複数の権限セットを合成しています
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: topogang-scheduler-as-volume-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:volume-scheduler
+subjects:
+- kind: ServiceAccount
+  name: topogang-scheduler
+  namespace: kube-system
+---
+#ConfigMap
+#Nodemask pluginに引数を与える
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: topogang-config
+  namespace: kube-system
+data:
+  scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: false
+    profiles:
+    - schedulerName: topogang-scheduler
+      plugins:
+        filter:
+          enabled:
+          - name: Nodemask
+        score:
+          enabled:
+          - name: Noop
+      pluginConfig: 
+      - name: Nodemask
+        args:
+          excludeLabel: do-not-schedule
+---
+#Deployment 複数スケジューラ方式(default scheduler方式と共存)によりスケジューラを定義する
+#コンテナにロードするイメージについて controller と kube-scheduler の違い
+#kube-scheduler: あなたの自作 plugin (Noop / Nodemask) を組み込んだ scheduler binary 本体。Day 2 で必要なのはこれだけ
+#controller: PodGroup や ElasticQuota などの CRD を watch する controller。Day 3 (PodGroup CRD 導入) 以降で必要
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: topogang-scheduler
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: topogang-scheduler
+  template:
+    metadata:
+      labels:
+        component: topogang-scheduler
+    spec:
+      serviceAccountName: topogang-scheduler #ServiceAccount名と同じにする必要あり
+      containers:
+      - name: topogang-scheduler
+        #docker-imageをclusterにロードさせて` docker exec topogang-cluster-control-plane crictl images | grep kube-scheduler`によりみた結果
+        image: localhost:5000/scheduler-plugins/kube-scheduler:v20260429-
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/kube-scheduler
+        args:
+        - --config=/etc/kubernetes/scheduler-config.yaml
+        - --v=4
+        volumeMounts:
+        - name: config
+          mountPath: /etc/kubernetes
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: topogang-config

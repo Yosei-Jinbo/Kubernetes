@@ -9,6 +9,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	fwk "k8s.io/kube-scheduler/framework"
+	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 )
 
 // これでわかるのはそのインターフェースを実装しているかどうか?
@@ -76,9 +77,10 @@ func (pl *Nodemask) Name() string {
 }
 
 func New(_ context.Context, obj runtime.Object, _ fwk.Handle) (fwk.Plugin, error) {
-	args, ok := obj.(*Args) //このargsはポインタになっている
-	if !ok {
-		return nil, fmt.Errorf("want *nodemask.Args, got %T", obj)
+	args := &Args{}
+	// runtime.Unknown / *Args どちらが来ても decode できる
+	if err := frameworkruntime.DecodeInto(obj, args); err != nil {
+		return nil, fmt.Errorf("decode Nodemask args: %w", err)
 	}
 	if args.ExcludeLabel == "" {
 		return nil, fmt.Errorf("want not nil excludelabel")
